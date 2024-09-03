@@ -30,13 +30,34 @@ public class OrdersCount {
         // 计算订单数量
         JavaDStream<Long> orderCount = orderRecords.count();
 
-        // 打印结果
+        // 打印订单数量
         orderCount.foreachRDD(rdd -> {
             if (!rdd.isEmpty()) {
                 System.out.println("Active Orders Count in this Batch: " + rdd.first());
             }
         });
 
+        // 计算每个批次的总金额
+        JavaDStream<Double> gmv = orderRecords.mapToDouble(json -> json.get("amount").asDouble()).reduce((a, b) -> a + b);
+        
+        // 打印每个批次的总金额
+        gmv.foreachRDD(rdd -> {
+            if (!rdd.isEmpty()) {
+                System.out.println("Total GMV in this Batch: " + rdd.first());
+            }
+        });
+
+        // 计算总访问量
+        JavaDStream<Long> visitCount = jsonObjects.count();
+        // 计算订单转化率
+        JavaDStream<Double> conversionRate = orderCount.transformToPair(count -> visitCount.map(visit -> (double) count / visit));
+        // 打印订单转化率
+        conversionRate.foreachRDD(rdd -> {
+            if (!rdd.isEmpty()) {
+                System.out.println("Order Conversion Rate in this Batch: " + rdd.first());
+            }
+        });
+        
         // 启动流计算
         ssc.start();
 
