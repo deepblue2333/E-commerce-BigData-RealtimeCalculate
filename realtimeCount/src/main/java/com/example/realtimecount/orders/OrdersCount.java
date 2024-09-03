@@ -6,6 +6,10 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.streaming.Duration;
 import org.apache.spark.streaming.api.java.JavaDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
+import org.apache.spark.api.java.function.PairFunction;
+import java.util.Arrays;
+import java.util.List;
+import scala.Tuple2;
 
 public class OrdersCount {
     public static void main(String[] args) throws InterruptedException {
@@ -38,26 +42,33 @@ public class OrdersCount {
         });
 
         // 计算每个批次的总金额
-        JavaDStream<Double> gmv = orderRecords.mapToDouble(json -> json.get("amount").asDouble()).reduce((a, b) -> a + b);
-        
+        JavaDStream<Double> gmv = orderRecords.map(json -> json.get("price").asDouble()).reduce((a, b) -> a + b);
         // 打印每个批次的总金额
         gmv.foreachRDD(rdd -> {
             if (!rdd.isEmpty()) {
                 System.out.println("Total GMV in this Batch: " + rdd.first());
             }
         });
+        
+        // 这何尝不是一种转换率
+        // 统计jsonObjects里order_id和timestamp两个标签出现的比例
+        JavaDStream<Double> labelRatio = jsonObjects.mapToPair((PairFunction<JsonNode, Boolean, Boolean>) json -> {
+            boolean hasOrderId = json.has("order_id");
+            boolean hasTimestamp = json.has("timestamp");
+            return new Tuple2<>(hasOrderId, hasTimestamp);
+        }).map(tuple -> {
+            int orderIdCount = tuple._1() ? 1 : 0;
+            int timestampCount = tuple._2() ? 1 : 0;
+            return new Tuple2<>(orderIdCount, timestampCount);
+        }).reduce((a, b) -> new Tuple2<>(a._1() + b._1(), a._2() + b._2()))
+        .map(tuple -> (double) tuple._1() / tuple._2());
 
-        // 计算总访问量
-        JavaDStream<Long> visitCount = jsonObjects.count();
-        // 计算订单转化率
-        JavaDStream<Double> conversionRate = orderCount.transformToPair(count -> visitCount.map(visit -> (double) count / visit));
-        // 打印订单转化率
-        conversionRate.foreachRDD(rdd -> {
+        // 打印标签出现的比例
+        labelRatio.foreachRDD(rdd -> {
             if (!rdd.isEmpty()) {
-                System.out.println("Order Conversion Rate in this Batch: " + rdd.first());
+                System.out.println("Order ID to Timestamp Ratio: " + rdd.first());
             }
         });
-        
         // 启动流计算
         ssc.start();
 
